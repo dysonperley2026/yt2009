@@ -36,7 +36,9 @@ ENV YT2009_PORT=80 \
     YT2009_AC=false \
     YT2009_GDATA_AUTH=false
 
-RUN npm install --allow-git=root && \
+
+RUN export NODE_OPTIONS="--max-http-header-size=65536" && \
+    npm install --allow-git=root && \
     ln -s /data/androiddata.json back/androiddata.json && \
     ln -s /data/tvdata.json back/tvdata.json && \
     ln -s /data/config.json back/config.json && \
@@ -47,6 +49,7 @@ RUN npm install --allow-git=root && \
     ln -s /data/cert.key cert.key && \
     echo "{\"env\": \"dev\"}" > back/config.json && \
     node post_config_setup.js
+
 
 CMD ["node", "backend.js"]
 ENTRYPOINT ["sh", "docker-entrypoint.sh"]
