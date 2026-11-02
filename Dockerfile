@@ -1,5 +1,4 @@
 FROM node:lts-alpine3.24
-
 RUN apk add --no-cache imagemagick cabextract git && \
     wget -P /tmp/ https://www.freedesktop.org/software/fontconfig/webfonts/webfonts.tar.gz && \
     tar -xzf /tmp/webfonts.tar.gz -C /tmp && \
@@ -21,7 +20,6 @@ USER node
 # don't modify the environment variables here if you're hosting, those are the defaults and are not supposed to be changed unless you're a developer
 # you can instead set them when launching the container, this way you don't have to fork the repo or rebuild the container every time you want to change something
 # if someone has told you to do modify them here please ignore their advice and tell them they're wrong
-
 ENV YT2009_PORT=80 \
     YT2009_ENV=dev \
     YT2009_IP=127.0.0.1 \
@@ -37,8 +35,6 @@ ENV YT2009_PORT=80 \
     YT2009_RATELIMIT=false \
     YT2009_AC=false \
     YT2009_GDATA_AUTH=false
-
-ENV NODE_OPTIONS="--max-http-header-size=65536"
 
 RUN npm install --allow-git=root && \
     ln -s /data/androiddata.json back/androiddata.json && \
