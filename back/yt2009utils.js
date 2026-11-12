@@ -1811,162 +1811,196 @@ module.exports = {
             }
         }
 
+
 function requestPlayer(isRetry) {
-            if(extraSettings && extraSettings.perfMode
-            && !isRetry) {
-                // turbocharge: save around 15ms per received response
-                // by requesting only required parts
-                let isBlocked = false;
-                let pullId = false;
-                if(extraSettings.turbochargeSession) {
-                    pullId = extraSettings.turbochargeSession + "/" + id
-                    if(turbochargeProcessPulls[pullId]) {
-                        isBlocked = true;
-                        devlog("pull blocked callback waiting")
-                        turbochargeProcessPulls[pullId].push(function(d) {
-                            processPlayerResponse(d)
-                            return;
-                        })
-                    } else {
-                        turbochargeProcessPulls[pullId] = []
+    if(extraSettings && extraSettings.perfMode && !isRetry) {
+        // turbocharge: save around 15ms per received response
+        // by requesting only required parts
+        let isBlocked = false;
+        let pullId = false;
+
+        if(extraSettings.turbochargeSession) {
+            pullId = extraSettings.turbochargeSession + "/" + id;
+
+            if(turbochargeProcessPulls[pullId]) {
+                isBlocked = true;
+                devlog("pull blocked callback waiting");
+
+                turbochargeProcessPulls[pullId].push(function(d) {
+                    processPlayerResponse(d);
+                    return;
+                });
+            } else {
+                turbochargeProcessPulls[pullId] = [];
+            }
+        }
+
+        if(isBlocked) return;
+
+        rHeaders["host"] = "youtubei.googleapis.com";
+        rHeaders["referer"] = "https://www.youtube.com/watch?v=" + id;
+        rHeaders["referer-policy"] = "origin-when-cross-origin";
+        rHeaders["mode"] = "cors";
+        rHeaders["accept-encoding"] = "";
+
+        let fields = [
+            "streamingData.adaptiveFormats",
+            "streamingData.serverAbrStreamingUrl",
+            "responseContext.visitorData",
+            "playabilityStatus.status",
+            "playabilityStatus.reason",
+            "videoDetails",
+            "playerConfig.mediaCommonConfig.mediaUstreamerRequestConfig",
+            "captions.playerCaptionsTracklistRenderer.captionTracks",
+            "storyboards"
+        ].join(",");
+
+        let url = [
+            "/youtubei/v1/player",
+            "?prettyPrint=false",
+            "&fields=" + fields
+        ];
+
+        let preq = https.request({
+            "host": yt2009exports.read().youtubeIp,
+            "port": 443,
+            "servername": "youtubei.googleapis.com",
+            "headers": rHeaders,
+            "method": "POST",
+            "path": url.join(""),
+            "agent": createFetchAgent()
+        }, (pres) => {
+            let data = Buffer.from("");
+
+            pres.on("data", (d) => {
+                data = Buffer.concat([data, d]);
+            });
+
+            pres.on("end", () => {
+                if(pres.headers["content-encoding"]
+                && pres.headers["content-encoding"].includes("gzip")) {
+                    try {
+                        data = zlib.gunzipSync(data);
+                    } catch(error) {
+                        console.log("[yt2009 PLAYER TURBOCHARGE GZIP ERROR]", error.message);
+                        return;
                     }
                 }
-                if(isBlocked) return;
-                rHeaders["host"] = "youtubei.googleapis.com"
-                rHeaders["referer"] = "https://www.youtube.com/watch?v=" + id
-                rHeaders["referer-policy"] = "origin-when-cross-origin"
-                rHeaders["mode"] = "cors"
-                rHeaders["accept-encoding"] = ""
-                let fields = [
-                    "streamingData.adaptiveFormats",
-                    "streamingData.serverAbrStreamingUrl",
-                    "responseContext.visitorData",
-                    "playabilityStatus.status",
-                    "playabilityStatus.reason",
-                    "videoDetails",
-                    "playerConfig.mediaCommonConfig.mediaUstreamerRequestConfig",
-                    "captions.playerCaptionsTracklistRenderer.captionTracks",
-                    "storyboards"
-                ].join(",")
-                let url = [
-                    "/youtubei/v1/player",
-                    "?prettyPrint=false",
-                    "&fields=" + fields
-                ]
-                let preq = https.request({
-                    "host": yt2009exports.read().youtubeIp,
-                    "port": 443,
-                    "servername": "youtubei.googleapis.com",
-                    "headers": rHeaders,
-                    "method": "POST",
-                    "path": url.join(""),
-                    "agent": createFetchAgent()
-                }, (pres) => {
-                    let data = Buffer.from("")
-                    pres.on("data", (d) => {
-                        data = Buffer.concat([data, d])
+
+                let d;
+
+                try {
+                    d = JSON.parse(data.toString());
+                } catch(error) {
+                    console.log("[yt2009 PLAYER TURBOCHARGE ERROR]", {
+                        status: pres.statusCode,
+                        contentType: pres.headers["content-type"],
+                        bodyPreview: data.toString().substring(0, 500)
                     });
-                    pres.on("end", () => {
-                        if(pres.headers["content-encoding"]
-                        && pres.headers["content-encoding"].includes("gzip")) {
-                            data = zlib.gunzipSync(data)
-                        }
-
-                        let d;
-                        try {
-                            d = JSON.parse(data.toString())
-                        } catch(error) {
-                            console.log("[yt2009 PLAYER TURBOCHARGE ERROR]", {
-                                status: pres.statusCode,
-                                contentType: pres.headers["content-type"],
-                                bodyPreview: data.toString().substring(0, 500)
-                            });
-                            return;
-                        }
-
-                        d.turbochargePartial = true;
-                        let waitCallback = false;
-                        function callbackToWaiters() {
-                            if(waitCallback) return true;
-                            if(pullId && turbochargeProcessPulls[pullId]) {
-                                devlog("callbacktowaiters success")
-                                turbochargeProcessPulls[pullId].forEach(c => {
-                                    c(d)
-                                })
-                                waitCallback = true;
-                                turbochargeProcessPulls[pullId] = null;
-                                delete turbochargeProcessPulls[pullId]
-                            }
-                        }
-                        if(!turbochargeProcessPulls[pullId]) {
-                            // maybe player too fast, check for 1s
-                            // if pending player to avoid requesting twice
-                            let l = 0;
-                            let x = setInterval(() => {
-                                callbackToWaiters()
-                                if(waitCallback) {
-                                    clearInterval(x)
-                                    return;
-                                }
-                                l++
-                                if(l >= 100) {
-                                    // no
-                                    clearInterval(x)
-                                }
-                            }, 10)
-                        } else {
-                            callbackToWaiters()
-                        }
-                        processPlayerResponse(d)
-                    })
-                });
-                preq.write(JSON.stringify(fullBody))
-                preq.end();
-                return;
-            }
-
-            fetch(hostname + "/youtubei/v1/player?prettyPrint=false", {
-                "headers": rHeaders,
-                "referrer": "https://www.youtube.com/watch?v=" + id,
-                "referrerPolicy": "origin-when-cross-origin",
-                "body": JSON.stringify(fullBody),
-                "method": "POST",
-                "mode": "cors",
-                "agent": createFetchAgent()
-            }).then(async r => {
-                const responseText = await r.text();
-
-                if(!r.ok || !responseText.trim().startsWith("{")) {
-                    console.log("[yt2009 PLAYER ERROR]", {
-                        url: hostname + "/youtubei/v1/player",
-                        status: r.status,
-                        statusText: r.statusText,
-                        contentType: r.headers.get("content-type"),
-                        bodyPreview: responseText.substring(0, 500)
-                    });
-
-                    if(r.status >= 400
-                    && extraSettings
-                    && extraSettings.tryOldVersion) {
-                        // old version dead; retry with current
-                        extraSettings.tryOldVersion = false;
-                        client.clientVersion = "21.16";
-                        rHeaders["user-agent"] = androidHeaders.headers["user-agent"];
-                        requestPlayer();
-                    }
                     return;
                 }
 
-                try {
-                    processPlayerResponse(JSON.parse(responseText));
-                } catch(error) {
-                    console.log("[yt2009 PLAYER JSON ERROR]", error.message);
-                    console.log(responseText.substring(0, 500));
+                d.turbochargePartial = true;
+
+                let waitCallback = false;
+
+                function callbackToWaiters() {
+                    if(waitCallback) return true;
+
+                    if(pullId && turbochargeProcessPulls[pullId]) {
+                        devlog("callbacktowaiters success");
+
+                        turbochargeProcessPulls[pullId].forEach(c => {
+                            c(d);
+                        });
+
+                        waitCallback = true;
+                        turbochargeProcessPulls[pullId] = null;
+                        delete turbochargeProcessPulls[pullId];
+                    }
                 }
-            }).catch(error => {
-                console.log("[yt2009 PLAYER FETCH ERROR]", error.message);
+
+                if(!turbochargeProcessPulls[pullId]) {
+                    // maybe player too fast, check for 1s
+                    // if pending player to avoid requesting twice
+                    let l = 0;
+
+                    let x = setInterval(() => {
+                        callbackToWaiters();
+
+                        if(waitCallback) {
+                            clearInterval(x);
+                            return;
+                        }
+
+                        l++;
+
+                        if(l >= 100) {
+                            clearInterval(x);
+                        }
+                    }, 10);
+                } else {
+                    callbackToWaiters();
+                }
+
+                processPlayerResponse(d);
             });
+        });
+
+        preq.on("error", error => {
+            console.log("[yt2009 PLAYER TURBOCHARGE FETCH ERROR]", error.message);
+        });
+
+        preq.write(JSON.stringify(fullBody));
+        preq.end();
+
+        return;
+    }
+
+    fetch(hostname + "/youtubei/v1/player?prettyPrint=false", {
+        "headers": rHeaders,
+        "referrer": "https://www.youtube.com/watch?v=" + id,
+        "referrerPolicy": "origin-when-cross-origin",
+        "body": JSON.stringify(fullBody),
+        "method": "POST",
+        "mode": "cors",
+        "agent": createFetchAgent()
+    }).then(async r => {
+        const responseText = await r.text();
+
+        if(!r.ok || !responseText.trim().startsWith("{")) {
+            console.log("[yt2009 PLAYER ERROR]", {
+                url: hostname + "/youtubei/v1/player",
+                status: r.status,
+                statusText: r.statusText,
+                contentType: r.headers.get("content-type"),
+                bodyPreview: responseText.substring(0, 500)
+            });
+
+            if(r.status >= 400
+            && extraSettings
+            && extraSettings.tryOldVersion) {
+                // old version dead; retry with current
+                extraSettings.tryOldVersion = false;
+                client.clientVersion = "21.16";
+                rHeaders["user-agent"] = androidHeaders.headers["user-agent"];
+                requestPlayer();
+            }
+
+            return;
         }
+
+        try {
+            processPlayerResponse(JSON.parse(responseText));
+        } catch(error) {
+            console.log("[yt2009 PLAYER JSON ERROR]", error.message);
+            console.log(responseText.substring(0, 500));
+        }
+    }).catch(error => {
+        console.log("[yt2009 PLAYER FETCH ERROR]", error.message);
+    });
+}
+
 
         this.getYtConfig((c) => {
             try {
