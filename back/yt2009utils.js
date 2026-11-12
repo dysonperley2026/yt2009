@@ -1810,7 +1810,8 @@ module.exports = {
                 "poToken": potBase64
             }
         }
-        function requestPlayer(isRetry) {
+
+function requestPlayer(isRetry) {
             if(extraSettings && extraSettings.perfMode
             && !isRetry) {
                 // turbocharge: save around 15ms per received response
@@ -1870,7 +1871,19 @@ module.exports = {
                         && pres.headers["content-encoding"].includes("gzip")) {
                             data = zlib.gunzipSync(data)
                         }
-                        let d = JSON.parse(data.toString())
+
+                        let d;
+                        try {
+                            d = JSON.parse(data.toString())
+                        } catch(error) {
+                            console.log("[yt2009 PLAYER TURBOCHARGE ERROR]", {
+                                status: pres.statusCode,
+                                contentType: pres.headers["content-type"],
+                                bodyPreview: data.toString().substring(0, 500)
+                            });
+                            return;
+                        }
+
                         d.turbochargePartial = true;
                         let waitCallback = false;
                         function callbackToWaiters() {
@@ -1911,6 +1924,7 @@ module.exports = {
                 preq.end();
                 return;
             }
+
             fetch(hostname + "/youtubei/v1/player?prettyPrint=false", {
                 "headers": rHeaders,
                 "referrer": "https://www.youtube.com/watch?v=" + id,
@@ -1919,54 +1933,39 @@ module.exports = {
                 "method": "POST",
                 "mode": "cors",
                 "agent": createFetchAgent()
-            
-}).then(async r => {
-    const responseText = await r.text();
+            }).then(async r => {
+                const responseText = await r.text();
 
-    if (!r.ok || !responseText.trim().startsWith("{")) {
-        console.log("[yt2009 PLAYER ERROR]", {
-            url: hostname + "/youtubei/v1/player",
-            status: r.status,
-            statusText: r.statusText,
-            contentType: r.headers.get("content-type"),
-            bodyPreview: responseText.substring(0, 500)
-        });
+                if(!r.ok || !responseText.trim().startsWith("{")) {
+                    console.log("[yt2009 PLAYER ERROR]", {
+                        url: hostname + "/youtubei/v1/player",
+                        status: r.status,
+                        statusText: r.statusText,
+                        contentType: r.headers.get("content-type"),
+                        bodyPreview: responseText.substring(0, 500)
+                    });
 
-        if (r.status >= 400
-        && extraSettings
-        && extraSettings.tryOldVersion) {
-            // Retry with the current client version
-            extraSettings.tryOldVersion = false;
-            client.clientVersion = "21.16";
-            rHeaders["user-agent"] = androidHeaders.headers["user-agent"];
-            requestPlayer();
-        }
-        return;
-    }
-
-    try {
-        processPlayerResponse(JSON.parse(responseText));
-    } catch (error) {
-        console.log("[yt2009 PLAYER JSON ERROR]", error.message);
-        console.log(responseText.substring(0, 500));
-    }
-})
-
-                if(r.status >= 400
-                && extraSettings
-                && extraSettings.tryOldVersion) {
-                    // old version dead
-                    // retry with current
-                    extraSettings.tryOldVersion = false;
-                    client.clientVersion = "21.16"
-                    rHeaders["user-agent"] = androidHeaders.headers["user-agent"]
-                    requestPlayer()
+                    if(r.status >= 400
+                    && extraSettings
+                    && extraSettings.tryOldVersion) {
+                        // old version dead; retry with current
+                        extraSettings.tryOldVersion = false;
+                        client.clientVersion = "21.16";
+                        rHeaders["user-agent"] = androidHeaders.headers["user-agent"];
+                        requestPlayer();
+                    }
                     return;
                 }
-                r.json().then(r => {
-                    processPlayerResponse(r)
-                })
-            })
+
+                try {
+                    processPlayerResponse(JSON.parse(responseText));
+                } catch(error) {
+                    console.log("[yt2009 PLAYER JSON ERROR]", error.message);
+                    console.log(responseText.substring(0, 500));
+                }
+            }).catch(error => {
+                console.log("[yt2009 PLAYER FETCH ERROR]", error.message);
+            });
         }
 
         this.getYtConfig((c) => {
